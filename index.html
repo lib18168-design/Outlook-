@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <title>AI生图账号助手 (Vue 3)</title>
+    <!-- Vue 3 + Element Plus CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- 自定义样式 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div id="app">
+    <div class="ios-container">
+        <div class="ios-header">
+          <h1 class="animated-gradient-text">🎨 生图账号助手 </h1>
+            <p>统一密码 · 一键复制 · 智能管理</p>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-number">[[ stats.total ]]</div><div class="stat-label">总账号</div></div>
+            <div class="stat-card"><div class="stat-number">[[ stats.available ]]</div><div class="stat-label">今日可用</div></div>
+            <div class="stat-card"><div class="stat-number">[[ stats.remaining_today ]]</div><div class="stat-label">剩余总次数</div></div>
+            <div class="stat-card"><div class="stat-number">[[ stats.used_today ]]/[[ stats.total_capacity ]]</div><div class="stat-label">已用/容量</div></div>
+        </div>
+
+        <!-- 操作栏 -->
+        <div class="action-bar">
+            <button class="ios-btn ios-btn-primary" @click="getAvailableAccount">🎲 领取可用账号</button>
+            <el-upload action="/api/accounts/batch" :show-file-list="false" :on-success="onImportSuccess" :on-error="onImportError" accept=".csv">
+                <button class="ios-btn ios-btn-outline">📂 导入 CSV</button>
+            </el-upload>
+            <button class="ios-btn ios-btn-outline" @click="exportAccounts">📎 导出 CSV</button>
+            <button class="ios-btn ios-btn-outline" @click="resetAllAccounts" style="color:#ff3b30;">🔄 重置所有账号</button>
+            <button class="ios-btn ios-btn-outline" @click="toggleDarkMode">🌙 深色模式</button>
+        </div>
+
+        <!-- 筛选栏 -->
+        <div class="filter-bar">
+            <div class="filter-item">
+                <el-select v-model="filters.group" placeholder="全部分组" clearable @change="resetAndLoad">
+                    <el-option label="全部分组" value="all"></el-option>
+                    <el-option v-for="g in groups" :key="g" :label="g" :value="g"></el-option>
+                </el-select>
+            </div>
+            <div class="filter-item">
+                <el-input v-model="filters.search" placeholder="搜索邮箱" clearable @clear="resetAndLoad" @keyup.enter="resetAndLoad"></el-input>
+            </div>
+            <div class="filter-item">
+                <el-button type="primary" @click="resetAndLoad" icon="el-icon-search">搜索</el-button>
+            </div>
+        </div>
+
+        <!-- 领取账号卡片 -->
+        <transition name="fade-slide">
+            <div v-if="currentAccount" class="account-card">
+                <p>📧 <strong style="color:var(--accent)">[[ currentAccount.email ]]</strong></p>
+                <p>🔑 密码：<strong>[[ unifiedPassword ]]</strong>
+                    <span class="copy-badge" @click="copyAccount(currentAccount.email)">📋 复制账号+密码</span>
+                </p>
+                <p>🎫 今日剩余：<strong style="color:var(--accent)">[[ currentAccount.remaining ]] 次</strong></p>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="use-btn" @click="useOne(currentAccount.id)">✓ 生成一张图，扣减1次</button>
+                    <button class="use-btn" @click="useAll(currentAccount.id)" style="background:#ff9f0a;">⚡ 已用完5次</button>
+                </div>
+            </div>
+        </transition>
+        <el-alert v-if="noAvailable" title="✨ 所有账号今日次数已用完，明天再来吧～" type="warning" :closable="false"></el-alert>
+
+        <!-- 账号列表表格 -->
+        <div class="table-wrapper">
+            <el-table :data="accounts" stripe style="width: 100%">
+                <el-table-column label="邮箱" min-width="320">
+                    <template #default="scope">
+                        <span class="email-highlight">[[ scope.row.email ]]</span>
+                        <button class="copy-btn-icon" @click="copyAccount(scope.row.email)">📋 复制</button>
+                    </template>
+                </el-table-column>
+                <el-table-column label="今日剩余" width="110">
+                    <template #default="scope">
+                        <el-tag :type="scope.row.remaining > 0 ? 'success' : 'danger'" size="small">
+                            [[ scope.row.remaining ]] 次
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="daily_used" label="今日已用" width="90"></el-table-column>
+                <el-table-column prop="last_used_date" label="最后使用" width="120"></el-table-column>
+                <el-table-column prop="group_name" label="分组" width="100"></el-table-column>
+                <el-table-column label="操作" width="120" fixed="right">
+                    <template #default="scope">
+                        <el-button size="small" type="primary" @click="useOne(scope.row.id)" :disabled="scope.row.remaining===0">扣减1次</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <el-pagination
+                @current-change="loadAccounts"
+                :current-page="page"
+                :page-size="50"
+                layout="total, prev, pager, next, jumper"
+                :total="total"
+                style="margin-top: 16px; justify-content: flex-end;">
+            </el-pagination>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
