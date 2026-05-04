@@ -21,3 +21,5 @@
 1. 安装依赖：
    ```bash
    pip install -r requirements.txt
+
+访问 http://127.0.0.1:5000
